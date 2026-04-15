@@ -33,7 +33,7 @@ MEENaive::MEENaive(MemoryManagerBase *memory_manager,
               cache_block_size),
       m_cxl_id(cxl_cntlr ? core_id : HOST_CXL_ID),
       m_mac_misses(0), m_mac_cache(NULL),
-      m_vn_misses(0), m_vn_table(NULL),
+      m_vn_misses(0), m_vn_evictions(0), m_vn_table(NULL),
       m_mee_perf_model(NULL),
       m_cxl_cntlr(cxl_cntlr),
       m_dram_cntlr(dram_cntlr),
@@ -75,6 +75,7 @@ MEENaive::MEENaive(MemoryManagerBase *memory_manager,
                            m_vn_table_entries, 1, getCacheBlockSize() * m_vn_per_entry, "lru",
                            CacheBase::PR_L1_CACHE, CacheBase::HASH_MOD);
     registerStatsMetric("mee", m_core_id, "vn-misses", &m_vn_misses);
+    registerStatsMetric("mee", m_core_id, "vn-evictions", &m_vn_evictions);
     }
 
 #ifdef MYLOG_ENABLED
@@ -155,12 +156,13 @@ bool MEENaive::insertVN(IntPtr v_addr, core_id_t requester, SubsecondTime now){
     if (hit) return false;
 
     /* Allocate VN entry */
-    bool eviction; 
+    bool eviction;
     IntPtr evict_address;
     CacheBlockInfo evict_block_info;
     m_vn_table->insertSingleLine(vn_entry_idx, NULL, &eviction, &evict_address,
                                 &evict_block_info, NULL, now);
-    // Always quiet eviction (no writeback)
+    // Always quiet eviction (no writeback); count for attack telemetry
+    if (eviction) m_vn_evictions++;
     return true;
 }
 

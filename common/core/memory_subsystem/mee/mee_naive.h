@@ -20,6 +20,7 @@ class MEENaive : public MEEBase {
      UInt32 m_vn_table_entries, m_vn_per_entry;
      SubsecondTime m_vn_table_latency;
      UInt64 m_vn_misses;
+     UInt64 m_vn_evictions; // proxy for Overflow Buffer pressure under attack
      Cache* m_vn_table;
 
      MEEPerfModel *m_mee_perf_model;

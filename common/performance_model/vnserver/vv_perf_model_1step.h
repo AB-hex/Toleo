@@ -35,6 +35,11 @@ class VVPerfModel1Step : public VVPerfModel
     SubsecondTime   m_total_update_latency;
     std::unordered_map<IntPtr, VN_Page> m_vault_pages;
 
+    // Attack telemetry: track version locality degradation
+    UInt64 m_one_step_to_vault;      // ONE_STEP -> VAULT transitions (locality broken)
+    UInt64 m_vault_to_overflow;      // VAULT -> OVERFLOW transitions (full degradation)
+    UInt64 m_overflow_penalty_iters; // total 32-loop DRAM iterations in OVERFLOW state
+
     std::ifstream if_trace_; // input trace file
     dramsim3::Transaction pending_trasaction; // pending transaction
 

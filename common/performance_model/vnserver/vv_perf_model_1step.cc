@@ -77,7 +77,10 @@ VVPerfModel1Step::VVPerfModel1Step(cxl_id_t cxl_id, UInt32 vn_size)
     : VVPerfModel(vn_size),
     m_dram_perf_model(NULL),
     m_total_read_delay(SubsecondTime::Zero()),
-    m_total_update_latency(SubsecondTime::Zero())
+    m_total_update_latency(SubsecondTime::Zero()),
+    m_one_step_to_vault(0),
+    m_vault_to_overflow(0),
+    m_overflow_penalty_iters(0)
     {
     fprintf(stderr, "Create Dram perf model from vvperfmodel, cxl_id %d\n", cxl_id);
     m_dram_perf_model = DramPerfModel::createDramPerfModel(cxl_id, VN_ENTRY_SIZE, DramType::CXL_VN);
@@ -86,6 +89,10 @@ VVPerfModel1Step::VVPerfModel1Step(cxl_id_t cxl_id, UInt32 vn_size)
     registerStatsMetric("vv", cxl_id, "total-update-latency", &m_total_update_latency);
     registerStatsMetric("vv", cxl_id, "dram-reads", &m_dram_reads);
     registerStatsMetric("vv", cxl_id, "dram-writes", &m_dram_writes);
+    // Attack telemetry stats
+    registerStatsMetric("vv", cxl_id, "one-step-to-vault", &m_one_step_to_vault);
+    registerStatsMetric("vv", cxl_id, "vault-to-overflow", &m_vault_to_overflow);
+    registerStatsMetric("vv", cxl_id, "overflow-penalty-iters", &m_overflow_penalty_iters);
 
 #ifdef MYTRACE_ENABLED
    f_trace = fopen("vv_perf.trace", "w+");
@@ -136,9 +143,12 @@ boost::tuple<SubsecondTime, UInt64> VVPerfModel1Step::getAccessLatency(
             DramCntlrInterface::READ, perf);
         dram_latency_max = dram_latency_max > dram_lat_trans ? dram_latency_max : dram_lat_trans;
     }
+    // Track OVERFLOW penalty loop iterations (each is a costly uncompressed DRAM read)
+    if (vn_page_type == VN_Page::OVER_FLOW)
+        m_overflow_penalty_iters += (UInt64)vn_page_type / VN_ENTRY_SIZE;
     dram_latency += dram_latency_max;
     m_dram_reads++;
-    // update only the dirty entry if neccessary 
+    // update only the dirty entry if neccessary
     if (access_type == CXLCntlrInterface::VN_UPDATE) {
         // if page doesn't exist, create it
         if (page_it == m_vault_pages.end())
@@ -148,9 +158,13 @@ boost::tuple<SubsecondTime, UInt64> VVPerfModel1Step::getAccessLatency(
         m_dram_perf_model->getAccessLatency(pkt_time + dram_latency, VN_ENTRY_SIZE, requester, address, DramCntlrInterface::WRITE, perf);
         m_dram_writes++;
 
-        // update the page
+        // update the page and track compression-state transitions
         VN_Page::vn_comp_t new_page_type = page_it->second.update(cl_num);
         if (new_page_type != vn_page_type){ // if we are allocating new entry for this page
+            if (vn_page_type == VN_Page::ONE_STEP && new_page_type == VN_Page::VAULT)
+                m_one_step_to_vault++;
+            else if (vn_page_type == VN_Page::VAULT && new_page_type == VN_Page::OVER_FLOW)
+                m_vault_to_overflow++;
             m_vault_pages[page_num] = VN_Page();
             vn_page_type = new_page_type;
             for (int size_read = 0; size_read < (UInt64)vn_page_type; size_read += VN_ENTRY_SIZE)
