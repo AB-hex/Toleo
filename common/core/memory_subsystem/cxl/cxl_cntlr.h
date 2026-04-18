@@ -8,22 +8,29 @@
 #include "shmem_perf.h"
 #include "fixed_types.h"
 #include "cxl_perf_model.h"
+#include "queue_model.h"
 #include "memory_manager_base.h"
 #include "subsecond_time.h"
 #include <vector>
 
 
-class CXLCntlr : public CXLCntlrInterface 
+class CXLCntlr : public CXLCntlrInterface
 {
     private:
-     std::vector<bool> m_cxl_connected; 
+     std::vector<bool> m_cxl_connected;
      UInt64* m_reads, *m_writes;
      CXLPerfModel** m_cxl_perf_models;
+
+     // Shared CXL bus queue — models the physical CXL link shared by data + VN traffic
+     QueueModel* m_shared_cxl_bus_queue;
+     ComponentBandwidth m_shared_cxl_bus_bw;
 
      FILE* f_trace;
      bool enable_trace;
 
     public:
+     QueueModel* getSharedBusQueue() { return m_shared_cxl_bus_queue; }
+     ComponentBandwidth* getSharedBusBandwidth() { return &m_shared_cxl_bus_bw; }
      CXLCntlr(MemoryManagerBase* memory_manager, ShmemPerfModel* shmem_perf_model, UInt32 cache_block_size, CXLAddressTranslator* cxl_address_tranlator, std::vector<bool>& cxl_connected);
      ~CXLCntlr();
      boost::tuple<SubsecondTime, HitWhere::where_t> getDataFromCXL(IntPtr address, core_id_t requester, Byte* data_buf, SubsecondTime now, ShmemPerf *perf, cxl_id_t cxl_id = INVALID_CXL_ID);

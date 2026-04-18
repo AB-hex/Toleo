@@ -10,17 +10,20 @@
 class CXLPerfModelMemoryExpander : public CXLPerfModel
 {
    private:
-      QueueModel* m_queue_model;
+      QueueModel* m_queue_model;        // shared bus queue (not owned)
+      ComponentBandwidth* m_bus_bw;     // shared bus bandwidth (not owned)
+      bool m_owns_queue;                // true only if we created a fallback queue
       SubsecondTime m_cxl_access_cost;
-      ComponentBandwidth m_cxl_bandwidth;
-      
+      ComponentBandwidth m_cxl_bandwidth; // kept for fallback only
+
       SubsecondTime m_total_queueing_delay;
       SubsecondTime m_total_access_latency;
 
       DramPerfModel* m_dram_perf_model;
 
      public:
-      CXLPerfModelMemoryExpander(cxl_id_t cxl_id, UInt64 transaction_size /* in bits */);
+      CXLPerfModelMemoryExpander(cxl_id_t cxl_id, UInt64 transaction_size /* in bits */,
+          QueueModel* shared_bus_queue = NULL, ComponentBandwidth* shared_bus_bw = NULL);
       ~CXLPerfModelMemoryExpander();
       SubsecondTime getAccessLatency(SubsecondTime pkt_time, UInt64 pkt_size,
                                      core_id_t requester, IntPtr address,

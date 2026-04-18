@@ -11,18 +11,21 @@
 class CXLVNPerfModel : public CXLPerfModel
 {
    private:
-      QueueModel* m_queue_model;
+      QueueModel* m_queue_model;        // shared bus queue (not owned)
+      ComponentBandwidth* m_bus_bw;     // shared bus bandwidth (not owned)
+      bool m_owns_queue;
       SubsecondTime m_cxl_access_cost;
-      ComponentBandwidth m_cxl_bandwidth;
-      
+      ComponentBandwidth m_cxl_bandwidth; // kept for fallback
+
       SubsecondTime m_total_queueing_delay;
       SubsecondTime m_total_access_latency;
- 
+
       VVPerfModel* m_vv_perf_model;
 
 
      public:
-      CXLVNPerfModel(cxl_id_t cxl_id, UInt64 cache_block_size /* in bits */);
+      CXLVNPerfModel(cxl_id_t cxl_id, UInt64 cache_block_size /* in bits */,
+          QueueModel* shared_bus_queue = NULL, ComponentBandwidth* shared_bus_bw = NULL);
       ~CXLVNPerfModel();
       SubsecondTime getAccessLatency(SubsecondTime pkt_time, UInt64 pkt_size,
                                      core_id_t requester, IntPtr address,
