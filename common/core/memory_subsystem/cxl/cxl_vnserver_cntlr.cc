@@ -46,7 +46,8 @@ CXLVNServerCntlr::CXLVNServerCntlr(
 
    if (m_vn_server_enabled){
       m_cxl_pkt_size = Sim()->getCfg()->getInt("perf_model/cxl/vnserver/pkt_size");
-      m_vn_perf_model = CXLPerfModel::createCXLPerfModel(m_vnserver_cxl_id, m_cxl_pkt_size, true);
+      m_vn_perf_model = CXLPerfModel::createCXLPerfModel(m_vnserver_cxl_id, m_cxl_pkt_size,
+          m_cxl_cntlr->getSharedBusQueue(), m_cxl_cntlr->getSharedBusBandwidth(), true);
       registerStatsMetric("cxl", m_vnserver_cxl_id, "reads", &m_vn_reads);
       registerStatsMetric("cxl", m_vnserver_cxl_id, "writes", &m_vn_updates);
    }

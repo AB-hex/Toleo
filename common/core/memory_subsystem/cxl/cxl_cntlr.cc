@@ -26,9 +26,17 @@ CXLCntlr::CXLCntlr(MemoryManagerBase* memory_manager, ShmemPerfModel* shmem_perf
     m_cxl_connected(cxl_connected),
     m_reads(NULL),
     m_writes(NULL),
+    m_shared_cxl_bus_queue(NULL),
+    m_shared_cxl_bus_bw(8 * Sim()->getCfg()->getFloat("perf_model/cxl/bus_bandwidth")),
     f_trace(NULL),
     enable_trace(false)
 {
+     // Create shared CXL bus queue — both data and VN traffic contend here
+     m_shared_cxl_bus_queue = QueueModel::create(
+         "cxl-bus", 0,
+         Sim()->getCfg()->getString("perf_model/cxl/queue_type"),
+         m_shared_cxl_bus_bw.getRoundedLatency(cache_block_size * 8));
+
      m_reads = (UInt64*) malloc(sizeof(UInt64)*cxl_connected.size());
      memset(m_reads, 0, sizeof(UInt64)*cxl_connected.size());
      m_writes = (UInt64*) malloc(sizeof(UInt64)*cxl_connected.size());
@@ -37,8 +45,9 @@ CXLCntlr::CXLCntlr(MemoryManagerBase* memory_manager, ShmemPerfModel* shmem_perf
      memset(m_cxl_perf_models, 0, sizeof(CXLPerfModel*) * cxl_connected.size());
      for (cxl_id_t cxl_id = 0; cxl_id < cxl_connected.size(); ++cxl_id) {
          if (cxl_connected[cxl_id]) {
-             /* Create CXL perf model */;
-             m_cxl_perf_models[cxl_id] = CXLPerfModel::createCXLPerfModel(cxl_id, cache_block_size * 8); 
+             /* Create CXL perf model with shared bus queue */;
+             m_cxl_perf_models[cxl_id] = CXLPerfModel::createCXLPerfModel(cxl_id, cache_block_size * 8,
+                 m_shared_cxl_bus_queue, &m_shared_cxl_bus_bw);
              /* convert from bytes to bits*/
              registerStatsMetric("cxl", cxl_id, "reads", &m_reads[cxl_id]);
              registerStatsMetric("cxl", cxl_id, "writes", &m_writes[cxl_id]);
@@ -66,6 +75,7 @@ CXLCntlr::~CXLCntlr()
        }
    }
    free(m_cxl_perf_models);
+   if (m_shared_cxl_bus_queue) delete m_shared_cxl_bus_queue;
 
 #ifdef MYLOG_ENABLED
    fclose(f_trace);

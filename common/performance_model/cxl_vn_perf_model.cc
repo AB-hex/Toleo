@@ -24,9 +24,12 @@
 #define MYTRACE(...) {}
 #endif
 
-CXLVNPerfModel::CXLVNPerfModel(cxl_id_t cxl_id, UInt64 transaction_size /* in bits */):
+CXLVNPerfModel::CXLVNPerfModel(cxl_id_t cxl_id, UInt64 transaction_size /* in bits */,
+    QueueModel* shared_bus_queue, ComponentBandwidth* shared_bus_bw):
     CXLPerfModel(cxl_id, transaction_size),
-    m_queue_model(NULL),
+    m_queue_model(shared_bus_queue),
+    m_bus_bw(shared_bus_bw),
+    m_owns_queue(false),
     m_cxl_bandwidth(8 * Sim()->getCfg()->getFloat("perf_model/cxl/vnserver/bandwidth")),
     m_total_queueing_delay(SubsecondTime::Zero()),
     m_total_access_latency(SubsecondTime::Zero()),
@@ -38,9 +41,15 @@ CXLVNPerfModel::CXLVNPerfModel(cxl_id_t cxl_id, UInt64 transaction_size /* in bi
         static_cast<uint64_t>(
             TimeConverter<float>::NStoFS(Sim()->getCfg()->getFloat(
                 "perf_model/cxl/vnserver/latency")));
-    m_queue_model = QueueModel::create("cxl-queue", cxl_id, Sim()->getCfg()->getString("perf_model/cxl/queue_type"),
-                                       m_cxl_bandwidth.getRoundedLatency(transaction_size));
-    
+    if (!m_queue_model) {
+        // Fallback: create own queue if no shared queue provided
+        m_queue_model = QueueModel::create("cxl-queue", cxl_id,
+            Sim()->getCfg()->getString("perf_model/cxl/queue_type"),
+            m_cxl_bandwidth.getRoundedLatency(transaction_size));
+        m_bus_bw = &m_cxl_bandwidth;
+        m_owns_queue = true;
+    }
+
     registerStatsMetric("cxl", cxl_id, "total-access-latency", &m_total_access_latency);
     registerStatsMetric("cxl", cxl_id, "total-queueing-delay", &m_total_queueing_delay);
 
@@ -54,7 +63,7 @@ CXLVNPerfModel::CXLVNPerfModel(cxl_id_t cxl_id, UInt64 transaction_size /* in bi
 
 CXLVNPerfModel::~CXLVNPerfModel()
 {
-    if (m_queue_model)
+    if (m_owns_queue && m_queue_model)
     {
         delete m_queue_model;
         m_queue_model = NULL;
@@ -77,9 +86,9 @@ SubsecondTime CXLVNPerfModel::getAccessLatency(SubsecondTime pkt_time, UInt64 pk
     boost::tie(vv_latency, pkt_size) = m_vv_perf_model->getAccessLatency(
         pkt_time, requester, address, access_type, perf);
 
-    SubsecondTime processing_time = m_cxl_bandwidth.getRoundedLatency(pkt_size);
+    SubsecondTime processing_time = m_bus_bw->getRoundedLatency(pkt_size);
 
-    // Compute Queue Delay
+    // Compute Queue Delay (shared CXL bus — contends with data traffic)
     SubsecondTime queue_delay;
     queue_delay = m_queue_model->computeQueueDelay(pkt_time + vv_latency, processing_time, requester);
 

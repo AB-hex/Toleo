@@ -1,8 +1,14 @@
 TARGET=sequential_reader
+TARGET2=random_reader
 include ../shared/Makefile.shared
 
 $(TARGET): $(TARGET).o
 	$(CC) $(TARGET).o $(SNIPER_LDFLAGS) -o $(TARGET)
+
+$(TARGET2): $(TARGET2).o
+	$(CC) $(TARGET2).o $(SNIPER_LDFLAGS) -o $(TARGET2)
+
+all: $(TARGET) $(TARGET2)
 
 # Run A: victim alone under Toleo (baseline — no attacker)
 run_victim_baseline:

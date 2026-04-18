@@ -5,11 +5,11 @@
 #include "vv_perf_model.h"
 #include "dram_perf_model.h"
 
-CXLPerfModel* CXLPerfModel::createCXLPerfModel(cxl_id_t cxl_id, UInt64 transaction_size, bool is_vn){
+CXLPerfModel* CXLPerfModel::createCXLPerfModel(cxl_id_t cxl_id, UInt64 transaction_size,
+    QueueModel* shared_bus_queue, ComponentBandwidth* shared_bus_bw, bool is_vn){
     if (is_vn){
-
-        return new CXLVNPerfModel(cxl_id, transaction_size);
+        return new CXLVNPerfModel(cxl_id, transaction_size, shared_bus_queue, shared_bus_bw);
     } else {
-        return new CXLPerfModelMemoryExpander(cxl_id, transaction_size);
+        return new CXLPerfModelMemoryExpander(cxl_id, transaction_size, shared_bus_queue, shared_bus_bw);
     }
 }

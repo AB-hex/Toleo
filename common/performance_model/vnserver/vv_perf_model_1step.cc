@@ -167,8 +167,10 @@ boost::tuple<SubsecondTime, UInt64> VVPerfModel1Step::getAccessLatency(
                 m_vault_to_overflow++;
             m_vault_pages[page_num] = VN_Page();
             vn_page_type = new_page_type;
-            for (int size_read = 0; size_read < (UInt64)vn_page_type; size_read += VN_ENTRY_SIZE)
+            for (int size_read = 0; size_read < (UInt64)vn_page_type; size_read += VN_ENTRY_SIZE) {
                 m_dram_perf_model->getAccessLatency(pkt_time + dram_latency, VN_ENTRY_SIZE, requester, address, DramCntlrInterface::WRITE, perf);
+                m_dram_writes++;
+            }
         }
     }
 

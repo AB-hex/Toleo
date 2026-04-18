@@ -24,9 +24,12 @@
 #define MYTRACE(...) {}
 #endif
 
-CXLPerfModelMemoryExpander::CXLPerfModelMemoryExpander(cxl_id_t cxl_id, UInt64 transaction_size /* in bits */):
+CXLPerfModelMemoryExpander::CXLPerfModelMemoryExpander(cxl_id_t cxl_id, UInt64 transaction_size /* in bits */,
+    QueueModel* shared_bus_queue, ComponentBandwidth* shared_bus_bw):
     CXLPerfModel(cxl_id, transaction_size),
-    m_queue_model(NULL),
+    m_queue_model(shared_bus_queue),
+    m_bus_bw(shared_bus_bw),
+    m_owns_queue(false),
     m_cxl_bandwidth(8 * Sim()->getCfg()->getFloat("perf_model/cxl/memory_expander_" + itostr((unsigned int)cxl_id) + "/bandwidth")),
     m_total_queueing_delay(SubsecondTime::Zero()),
     m_total_access_latency(SubsecondTime::Zero()),
@@ -38,11 +41,16 @@ CXLPerfModelMemoryExpander::CXLPerfModelMemoryExpander(cxl_id_t cxl_id, UInt64 t
         SubsecondTime::FS() *
         static_cast<uint64_t>(
             TimeConverter<float>::NStoFS(Sim()->getCfg()->getFloat(
-                "perf_model/cxl/memory_expander_" + itostr((unsigned int)cxl_id) + "/latency"))); 
-    m_queue_model = QueueModel::create(
-        "cxl-queue", cxl_id,
-        Sim()->getCfg()->getString("perf_model/cxl/queue_type"),
-        m_cxl_bandwidth.getRoundedLatency(transaction_size));
+                "perf_model/cxl/memory_expander_" + itostr((unsigned int)cxl_id) + "/latency")));
+    if (!m_queue_model) {
+        // Fallback: create own queue if no shared queue provided
+        m_queue_model = QueueModel::create(
+            "cxl-queue", cxl_id,
+            Sim()->getCfg()->getString("perf_model/cxl/queue_type"),
+            m_cxl_bandwidth.getRoundedLatency(transaction_size));
+        m_bus_bw = &m_cxl_bandwidth;
+        m_owns_queue = true;
+    }
 
     registerStatsMetric("cxl", cxl_id, "total-access-latency", &m_total_access_latency);
     registerStatsMetric("cxl", cxl_id, "total-queueing-delay", &m_total_queueing_delay);
@@ -57,7 +65,7 @@ CXLPerfModelMemoryExpander::CXLPerfModelMemoryExpander(cxl_id_t cxl_id, UInt64 t
 
 CXLPerfModelMemoryExpander::~CXLPerfModelMemoryExpander()
 {
-    if (m_queue_model)
+    if (m_owns_queue && m_queue_model)
     {
         delete m_queue_model;
         m_queue_model = NULL;
@@ -73,9 +81,9 @@ SubsecondTime CXLPerfModelMemoryExpander::getAccessLatency(SubsecondTime pkt_tim
     if ((!m_enabled) || (requester >= (core_id_t) Config::getSingleton()->getApplicationCores()))
         return SubsecondTime::Zero();
     
-    SubsecondTime processing_time = m_cxl_bandwidth.getRoundedLatency(pkt_size);
+    SubsecondTime processing_time = m_bus_bw->getRoundedLatency(pkt_size);
 
-    // Compute Queue Delay
+    // Compute Queue Delay (shared CXL bus — contends with VN traffic)
     SubsecondTime queue_delay;
     queue_delay = m_queue_model->computeQueueDelay(pkt_time, processing_time, requester);
 
