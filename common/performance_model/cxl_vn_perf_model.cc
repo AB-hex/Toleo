@@ -33,7 +33,11 @@ CXLVNPerfModel::CXLVNPerfModel(cxl_id_t cxl_id, UInt64 transaction_size /* in bi
     m_cxl_bandwidth(8 * Sim()->getCfg()->getFloat("perf_model/cxl/vnserver/bandwidth")),
     m_total_queueing_delay(SubsecondTime::Zero()),
     m_total_access_latency(SubsecondTime::Zero()),
-    m_vv_perf_model(NULL)
+    m_vv_perf_model(NULL),
+    m_throttle_enabled(false),
+    m_throttle_period_per_update(SubsecondTime::Zero()),
+    m_throttle_hits(0),
+    m_throttle_delay_ns(0)
 {
     m_vv_perf_model = VVPerfModel::createVVPerfModel(cxl_id, transaction_size);
     m_cxl_access_cost =
@@ -50,8 +54,25 @@ CXLVNPerfModel::CXLVNPerfModel(cxl_id_t cxl_id, UInt64 transaction_size /* in bi
         m_owns_queue = true;
     }
 
+    // Optional dynamic throttle (Run E mitigation). Disabled by default so
+    // Runs A–D produce identical results to the un-throttled baseline.
+    try {
+        m_throttle_enabled = Sim()->getCfg()->getBool("perf_model/cxl/vnserver/throttle/enable");
+    } catch (...) {
+        m_throttle_enabled = false;
+    }
+    if (m_throttle_enabled) {
+        UInt64 rate_per_us = static_cast<UInt64>(
+            Sim()->getCfg()->getInt("perf_model/cxl/vnserver/throttle/rate_per_us_per_core"));
+        if (rate_per_us == 0) rate_per_us = 1;
+        // 1 microsecond = 1000 ns;  period per update = 1000 ns / rate
+        m_throttle_period_per_update = SubsecondTime::NS(1000) / rate_per_us;
+    }
+
     registerStatsMetric("cxl", cxl_id, "total-access-latency", &m_total_access_latency);
     registerStatsMetric("cxl", cxl_id, "total-queueing-delay", &m_total_queueing_delay);
+    registerStatsMetric("cxl", cxl_id, "throttle-hits", &m_throttle_hits);
+    registerStatsMetric("cxl", cxl_id, "throttle-delay-ns", &m_throttle_delay_ns);
 
 #ifdef MYTRACE_ENABLED
     std::ostringstream trace_filename;
@@ -82,6 +103,29 @@ SubsecondTime CXLVNPerfModel::getAccessLatency(SubsecondTime pkt_time, UInt64 pk
     if ((!m_enabled) || (requester >= (core_id_t) Config::getSingleton()->getApplicationCores()))
         return SubsecondTime::Zero();
 
+    // ── Dynamic per-tenant throttle (Run E mitigation) ─────────────────────
+    // Token-bucket rate limiter on VN_UPDATEs only, applied at the device
+    // front-end before the request enters the shared CXL queue.  Reads pass
+    // through unmodified; benign workloads with low write rates are unaffected.
+    //
+    // Per-access throttle delay feeds into access_latency unmodified so the
+    // simulator's core model sees the full back-pressure.  The cumulative
+    // throttle delay is recorded as a UInt64 nanosecond counter (separate
+    // from the device's total-access-latency SubsecondTime, which would
+    // overflow under sustained attack — see header comment).
+    SubsecondTime throttle_delay = SubsecondTime::Zero();
+    if (m_throttle_enabled && access_type == CXLCntlrInterface::VN_UPDATE) {
+        auto it = m_throttle_next_allowed.find(requester);
+        SubsecondTime allowed = (it != m_throttle_next_allowed.end()) ? it->second : SubsecondTime::Zero();
+        if (pkt_time < allowed) {
+            throttle_delay = allowed - pkt_time;
+            pkt_time = allowed;
+            m_throttle_hits++;
+            m_throttle_delay_ns += throttle_delay.getNS();
+        }
+        m_throttle_next_allowed[requester] = pkt_time + m_throttle_period_per_update;
+    }
+
     SubsecondTime vv_latency;
     boost::tie(vv_latency, pkt_size) = m_vv_perf_model->getAccessLatency(
         pkt_time, requester, address, access_type, perf);
@@ -92,7 +136,7 @@ SubsecondTime CXLVNPerfModel::getAccessLatency(SubsecondTime pkt_time, UInt64 pk
     SubsecondTime queue_delay;
     queue_delay = m_queue_model->computeQueueDelay(pkt_time + vv_latency, processing_time, requester);
 
-    SubsecondTime access_latency = queue_delay + processing_time + vv_latency + m_cxl_access_cost;
+    SubsecondTime access_latency = throttle_delay + queue_delay + processing_time + vv_latency + m_cxl_access_cost;
 
     switch(access_type){
         case CXLCntlrInterface::VN_READ:
@@ -109,7 +153,12 @@ SubsecondTime CXLVNPerfModel::getAccessLatency(SubsecondTime pkt_time, UInt64 pk
 
     // Update Memory Counters
     m_num_accesses++;
-    m_total_access_latency += access_latency;
+    // total-access-latency tracks the device's own service time (queue +
+    // processing + DRAM + access cost), excluding the throttle wait. The
+    // throttle wait is captured separately via throttle-delay-ns to keep
+    // this stat's average bounded under sustained back-pressure.
+    SubsecondTime device_latency = queue_delay + processing_time + vv_latency + m_cxl_access_cost;
+    m_total_access_latency += device_latency;
     m_total_queueing_delay += queue_delay;
 
     return access_latency;

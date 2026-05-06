@@ -1,6 +1,7 @@
 #ifndef __CXL_VN_PERF_MODEL_H__
 #define __CXL_VN_PERF_MODEL_H__
 
+#include <unordered_map>
 #include "cxl_perf_model.h"
 #include "queue_model.h"
 #include "fixed_types.h"
@@ -21,6 +22,26 @@ class CXLVNPerfModel : public CXLPerfModel
       SubsecondTime m_total_access_latency;
 
       VVPerfModel* m_vv_perf_model;
+
+      // ── Dynamic per-tenant throttling (Run E mitigation) ───────────────────
+      // Token-bucket rate limiter applied to VN_UPDATEs only.  When a core
+      // exceeds its allowed update rate the request is delayed so subsequent
+      // VN_UPDATEs from that core arrive at the device queue at most every
+      // m_throttle_period_per_update.  Default: disabled (matches Run A–D).
+      //
+      // Accumulator note: under a sustained attack the cumulative throttle
+      // delay can grow O(N²) (each new request inherits the debt of all
+      // previous bursty requests). At N = 324 K updates with a 200 ns period,
+      // the sum reaches ~1e19 fs — past Int64 max if stored in SubsecondTime
+      // (which is fs internally).  We therefore (a) keep the per-access
+      // SubsecondTime arithmetic exact for back-pressure correctness, and
+      // (b) accumulate the cumulative throttle into a UInt64 nanosecond
+      // counter for the stat, which gives ~5800-year head-room.
+      bool m_throttle_enabled;
+      SubsecondTime m_throttle_period_per_update;  // 1 / configured rate
+      std::unordered_map<core_id_t, SubsecondTime> m_throttle_next_allowed;
+      UInt64 m_throttle_hits;          // # of VN_UPDATEs that incurred a delay
+      UInt64 m_throttle_delay_ns;      // cumulative throttle delay (nanoseconds)
 
 
      public:

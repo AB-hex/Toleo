@@ -42,20 +42,24 @@ run_exp() {
 }
 
 # A'  — Victim alone, Toleo
-run_exp "1/4 Victim alone (Toleo)" \
+run_exp "1/5 Run A — Victim alone (Toleo)" \
     random_victim_alone_toleo zen4_vn "$TRACES/random_victim.sift"
 
 # A'b — Victim alone, no Toleo
-run_exp "2/4 Victim alone (no Toleo)" \
+run_exp "2/5 Run A'b — Victim alone (no Toleo)" \
     random_victim_alone_baseline zen4_cxl "$TRACES/random_victim.sift"
 
 # C'  — Combined, Toleo
-run_exp "3/4 Combined (Toleo)" \
+run_exp "3/5 Run C — Combined (Toleo)" \
     random_combined_toleo zen4_vn "$TRACES/attacker.sift,$TRACES/random_victim.sift"
 
 # D'  — Combined, no Toleo
-run_exp "4/4 Combined (no Toleo)" \
+run_exp "4/5 Run D — Combined (no Toleo, control)" \
     random_combined_baseline zen4_cxl "$TRACES/attacker.sift,$TRACES/random_victim.sift"
+
+# E   — Combined, Toleo + dynamic per-tenant VN throttling (mitigation)
+run_exp "5/5 Run E — Combined (Toleo + throttle mitigation)" \
+    random_combined_throttle zen4_vn_throttle "$TRACES/attacker.sift,$TRACES/random_victim.sift"
 
 echo "============================================"
 echo "  All done. Call me back to analyze results."
