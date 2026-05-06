@@ -151,15 +151,20 @@ void MEENaive::insertMAC(Cache::access_t access, IntPtr mac_addr, core_id_t requ
 bool MEENaive::insertVN(IntPtr v_addr, core_id_t requester, SubsecondTime now){
     if (!m_vn_cache_enabled) return true; // no VN cache
 
-    IntPtr vn_entry_idx = v_addr / (m_vn_per_entry * getCacheBlockSize());
-    bool hit = m_vn_table->accessSingleLine(vn_entry_idx, Cache::LOAD, NULL, 0, now, false);
+    /* Pass the byte address directly; the Cache class divides by its block size
+     * (m_vn_per_entry * cache_block_size = 4096) internally to compute the page
+     * index and uses page_index % num_sets for the set, which correctly
+     * distributes pages across all 256 sets. (Bug fix: previously we
+     * pre-divided by 4096 and the cache divided by 4096 again, collapsing
+     * 4096 different pages onto each cache entry.) */
+    bool hit = m_vn_table->accessSingleLine(v_addr, Cache::LOAD, NULL, 0, now, false);
     if (hit) return false;
 
     /* Allocate VN entry */
     bool eviction;
     IntPtr evict_address;
     CacheBlockInfo evict_block_info;
-    m_vn_table->insertSingleLine(vn_entry_idx, NULL, &eviction, &evict_address,
+    m_vn_table->insertSingleLine(v_addr, NULL, &eviction, &evict_address,
                                 &evict_block_info, NULL, now);
     // Always quiet eviction (no writeback); count for attack telemetry
     if (eviction) m_vn_evictions++;
@@ -179,16 +184,16 @@ MEENaive::lookupVN(IntPtr v_addr, core_id_t requester, SubsecondTime now, ShmemP
             SubsecondTime::Zero(), HitWhere::CXL_VN);
 
     SubsecondTime latency = m_vn_table_latency;
-    IntPtr vn_entry_idx = v_addr / (m_vn_per_entry * getCacheBlockSize());
-    bool hit = m_vn_table->accessSingleLine(vn_entry_idx, Cache::LOAD, NULL, 0, now, true);
+    /* See insertVN for why we pass v_addr (byte address) instead of pre-dividing. */
+    bool hit = m_vn_table->accessSingleLine(v_addr, Cache::LOAD, NULL, 0, now, true);
     if (hit) {
         return boost::make_tuple<SubsecondTime, HitWhere::where_t>(latency, HitWhere::MEE_CACHE);
-    } 
+    }
 
 
     /* If we're on CXL, fetch VN from CXL */
     if (m_cxl_cntlr){
-        MYLOG("[%d]fetch VN @ %016lx", requester, vn_entry_idx);
+        MYLOG("[%d]fetch VN @ %016lx", requester, v_addr);
         latency += ((CXLVNServerCntlr*) m_cxl_cntlr)->getVN(v_addr, requester, now, perf);
         // do not allocate vn entry. Only allocate on DecryptVerifyData. 
     }
